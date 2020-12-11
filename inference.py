@@ -86,10 +86,7 @@ def inference(mels, real_audio = None, i=0, epoch=0):
     audio = torch.zeros(1, 1, 1).to(device)
     with torch.no_grad():
         for length in range(1, mels.shape[2] + 1):
-            if length % 100 == 0:
-                print(length)
             res = generator(audio[:, :, -1:], mels[:, :, length-1:length])
-            #res = generator(audio[:, :, -2048:], mels[:, :, max(0, length-2048):length])
             audio = torch.cat([audio, mu_decode(torch.argmax(res[:, :, -1:], dim=1)).unsqueeze(1)], dim=2)
         name = "example " + str(i) + "_no_tf"
         wandb_gen = wandb.Audio(audio[0].squeeze().detach().cpu().numpy(), caption="Inference", sample_rate=22050)
@@ -105,58 +102,19 @@ def inference_fast(mels, real_audio = None, i=0, epoch=0):
     audio = torch.zeros(mels.shape[0], 1, 1).to(device)
     with torch.no_grad():
         for length in range(1, mels.shape[2] + 1):
-            if length % 1000 == 0:
-                print(length)
             res = generator(audio[:, :, -1:], mels[:, :, length-1:length], fast_generation=True)
             audio = torch.cat([audio, mu_decode(torch.argmax(res[:, :, -1:], dim=1)).unsqueeze(1)], dim=2)
         name = "example " + str(i) + "_no_tf"
+        torchaudio.save("gen.wav", audio[0].squeeze().detach().cpu().numpy(), sample_rate=22050)
         wandb_gen = wandb.Audio(audio[0].squeeze().detach().cpu().numpy(), caption="Inference_1", sample_rate=22050)
         wandb_audios = [wandb_gen]
         if real_audio != None:
             wandb_real = wandb.Audio(real_audio[0].squeeze().detach().cpu().numpy(), caption="Real_1", sample_rate=22050)
             wandb_audios.append(wandb_real)
-        wandb_gen2 = wandb.Audio(audio[1].squeeze().detach().cpu().numpy(), caption="Inference_2", sample_rate=22050)
-        wandb_audios.append(wandb_gen2)
-        if real_audio != None:
-            wandb_real2 = wandb.Audio(real_audio[1].squeeze().detach().cpu().numpy(), caption="Real_2", sample_rate=22050)
-            wandb_audios.append(wandb_real2)
         wandb.log({name: wandb_audios}, step=epoch)
-
-def val(epoch):
-    generator.eval()
-    val_losses = []
-    with torch.no_grad():
-        i = 0
-        for audio_b, mels_b, text_b in dataloader_val:
-            if i%20 == 0:
-                for param_group in optimizer.param_groups:
-                    print(param_group['lr'])
-            audio_b, mels_b, text_b = audio_b.to(device), mels_b.to(device), text_b.to(device)
-            pad_mask = (audio_b != 0).to(device)
-            res = generator(F.pad(audio_b[:, :, :-1], (1, 0)), mels_b)
-            loss = criterion(res, mu_encode(audio_b).squeeze(1).type(torch.long))
-            res = torch.argmax(res, dim=1)
-            
-            val_losses.append(loss.item())
-            if i < 8:
-                name = "example " + str(i)
-                text = [chr(c) for c in text_b[0]]
-                text = ''.join(text)
-                wandb_gen = wandb.Audio(mu_decode(res[0]).detach().cpu().numpy(), caption="Generated", sample_rate=22050)
-                wandb_real = wandb.Audio(audio_b[0].squeeze().detach().cpu().numpy(), caption="Real", sample_rate=22050)
-                wandb_audios = [wandb_gen, wandb_real]
-                wandb.log({name: wandb_audios}, step=epoch)
-            if i > 500:
-                break
-            i += 1
-    print('Val loss', np.mean(val_losses))
-    wandb.log({"Val loss": np.mean(val_losses)}, step=epoch)
 
 def run_inference():
     for audio_b, mels_b, text_b in dataloader_val:
-        if i%20 == 0:
-            for param_group in optimizer.param_groups:
-                print(param_group['lr'])
         audio_b, mels_b, text_b = audio_b.to(device), mels_b.to(device), text_b.to(device)
         inference_fast(mels_b[:1], audio_b[:1], epoch=0)
         break
